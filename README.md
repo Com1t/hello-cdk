@@ -1,97 +1,91 @@
-## Serverless scikit-learn Model Serving
+## hello-cdk
 
-This examples illustrates how to serve scikit-learn model on Lambda Function to predict based on iris dataset.
+This repository will introduce you how take [Serverless scikit-learn Model Serving](https://github.com/aws-samples/aws-lambda-docker-serverless-inference/tree/main/scikit-learn-inference-docker-lambda) lambda fucntion to work with AWS cdk
+In this tutorial, I'm going to introduce how to use lambda function with cdk, while using docker environment
 
-This project contains source code and supporting files for a serverless application that you can deploy with the SAM CLI. It includes the following files and folders.
+The reason why we use docker environment, instead of simple `layer + source code` is beacuse AWS limits only 250MB for layers, which is very limited for us as data scientist that we use big library all the time
 
-- app - Code for the application's Lambda function.
-- train-code - Code for training scikit-learn model based on iris dataset.
-- events - Invocation events that you can use to invoke the function.
-- template.yaml - A template that defines the application's AWS resources.
+See some more information about limited layer size [Building layer for nft model](https://hackmd.io/ammHmkPuQ-uTpw-uf2tM9A)
 
-The application uses several AWS resources, including Lambda functions. These resources are defined in the `template.yaml` file in this project. You can update the template to add AWS resources through the same deployment process that updates your application code.
+## Steps for creating docker version of lambda
+Here I'm going to take [aws-lambda-docker-serverless-inference/scikit-learn-inference-docker-lambda](https://github.com/aws-samples/aws-lambda-docker-serverless-inference/tree/main/scikit-learn-inference-docker-lambda) as a example, to introduce how to use lambda function with docker
 
-## Deploy the sample application
-
-The Serverless Application Model Command Line Interface (SAM CLI) is an extension of the AWS CLI that adds functionality for building and testing Lambda applications. It uses Docker to run your functions in an Amazon Linux environment that matches Lambda. It can also emulate your application's build environment and API.
-
-To use the SAM CLI, you need the following tools.
-
-* SAM CLI - [Install the SAM CLI](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-install.html)
-* Docker - [Install Docker community edition](https://hub.docker.com/search/?type=edition&offering=community)
-
-You may need the following for local testing.
-* [Python 3 installed](https://www.python.org/downloads/)
-
-To build and deploy your application for the first time, run the following in your shell:
-
-```bash
-sam build
-sam deploy --guided
+### Create your own docker file
+After you prepared your lambda handler
+Your question would be how to use docker to build the environment
+It's very easy to build a dockerfile for lambda
+AWS provide most runtime that we mostly use, they also give you the right to choose some other docker images as you want
+[See here for more information](https://docs.aws.amazon.com/lambda/latest/dg/runtimes-images.html#runtimes-images-lp)
+All you need to do is to choose the right runtime, build dependencies, and set `CMD` to your lambda handler
 ```
+FROM public.ecr.aws/lambda/python:3.7
 
-The first command will build a docker image from a Dockerfile and then copy the source of your application inside the Docker image. The second command will package and deploy your application to AWS, with a series of prompts:
+COPY requirements.txt ./
+RUN python3.7 -m pip install -r requirements.txt -t .
 
-* **Stack Name**: The name of the stack to deploy to CloudFormation. This should be unique to your account and region, and a good starting point would be something matching your project name.
-* **AWS Region**: The AWS region you want to deploy your app to.
-* **Confirm changes before deploy**: If set to yes, any change sets will be shown to you before execution for manual review. If set to no, the AWS SAM CLI will automatically deploy application changes.
-* **Allow SAM CLI IAM role creation**: Many AWS SAM templates, including this example, create AWS IAM roles required for the AWS Lambda function(s) included to access AWS services. By default, these are scoped down to minimum required permissions. To deploy an AWS CloudFormation stack which creates or modified IAM roles, the `CAPABILITY_IAM` value for `capabilities` must be provided. If permission isn't provided through this prompt, to deploy this example you must explicitly pass `--capabilities CAPABILITY_IAM` to the `sam deploy` command.
-* **Save arguments to samconfig.toml**: If set to yes, your choices will be saved to a configuration file inside the project, so that in the future you can just re-run `sam deploy` without parameters to deploy changes to your application.
+COPY ./train-code/scikit_learn_iris.py ./
+RUN python scikit_learn_iris.py
 
-## Use the SAM CLI to build and test locally
+COPY ./app/app.py   ./
 
-Build your application with the `sam build` command.
-
-```bash
-scikit-learn-inference-docker-lambda$ sam build
+CMD ["app.handler"]
 ```
-
-The SAM CLI builds a docker image from a Dockerfile and then installs dependencies defined in `requirements.txt` inside the docker image. The processed template file is saved in the `.aws-sam/build` folder.
-
-Test a single function by invoking it directly with a test event. An event is a JSON document that represents the input that the function receives from the event source. Test events are included in the `events` folder in this project.
-
-Run functions locally and invoke them with the `sam local invoke` command.
-
-```bash
-scikit-learn-inference-docker-lambda$ sam local invoke ScikitLearnInferenceFunction --event events/event.json
+And build a 'yaml' file to tell 'sam' how to build this image properly(e.g. where's the `Dockerfile`), and set it's name for invoke (Here the name is set as 'ScikitLearnInferenceFunction')
 ```
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+Description: >
+  scikit-learn-inference-docker-lambda
+  SAM Template for scikit-learn-inference-docker-lambda
+Resources:
+  ScikitLearnInferenceFunction:
+    Type: AWS::Serverless::Function # More info about Function Resource: https://github.com/awslabs/serverless-application-model/blob/master/versions/2016-10-31.md#awsserverlessfunction
+    Properties:
+      PackageType: Image
+      MemorySize: 256
+      Timeout: 60
+    Metadata:
+      DockerTag: python3.7-v1
+      DockerContext: .
+      Dockerfile: Dockerfile
 
-## Testing your Lambda function in the Cloud
-
-1. In the [Lambda Console](https://console.aws.amazon.com/lambda/), select Configure test events from the Test events dropdown.
-2. For Event Name, enter InferenceTestEvent.
-3. Copy the event JSON from [here](./events/event.json) and paste in the dialog box.
-4. Choose _**Create**_.
-
-![Configure test event](../img/scikit-learn_configure_test_event.png)
-
-After saving, you see InferenceTestEvent in the Test list. Now choose _**Test**_.
-
-You see the Lambda function inference result, log output, and duration:
-
-![Lambda execution result](../img/scikit-learn_execution_result.png)
-
-## Fetch, tail, and filter Lambda function logs
-
-To simplify troubleshooting, SAM CLI has a command called `sam logs`. `sam logs` lets you fetch logs generated by your deployed Lambda function from the command line. In addition to printing the logs on the terminal, this command has several nifty features to help you quickly find the bug.
-
-`NOTE`: This command works for all AWS Lambda functions; not just the ones you deploy using SAM.
-
-```bash
-scikit-learn-inference-docker-lambda$ sam logs -n ScikitLearnInferenceFunction --stack-name scikit-learn-inference-docker-lambda --tail
+Outputs:
+  ScikitLearnInferenceFunction:
+    Description: "ScikitLearnInference Lambda Function ARN"
+    Value: !GetAtt ScikitLearnInferenceFunction.Arn
+  ScikitLearnInferenceFunctionIamRole:
+    Description: "Implicit IAM Role created for ScikitLearnInference function"
+    Value: !GetAtt ScikitLearnInferenceFunction.Arn
 ```
+Then use `sam build` to build this image
+And use `sam local invoke {function name} --event {event for lambda}.json` to test lambda function correctness
 
-You can find more information and examples about filtering Lambda function logs in the [SAM CLI Documentation](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/serverless-sam-cli-logging.html).
+### Create a cdk environment
+Create the cdk environment in any empty folder by
+`cdk init --language python`
 
-## Cleanup
+Yout should see 'cdk' provides following files for you
+![](https://i.imgur.com/Niotde4.png)
 
-To delete the sample application that you created, use the AWS CLI. Assuming you used your project name for the stack name, you can run the following:
+The most important parts are 'cdk.json' and 'app.py'
 
-```bash
-aws cloudformation delete-stack --stack-name scikit-learn-inference-docker-lambda
-```
+In 'cdk.json' you will tell 'cdk' where is the entrypoint of your instruction for IaC, and what file should be include or not
 
-## Resources
+![](https://i.imgur.com/Ef1BcL2.png)
 
-See the [AWS SAM developer guide](https://docs.aws.amazon.com/serverless-application-model/latest/developerguide/what-is-sam.html) for an introduction to SAM specification, the SAM CLI, and serverless application concepts.
+In 'app.py' you will tell 'cdk' AWS deployment information
+Here, I create a class inheritant 'Stack'
+In line 18-22, I use 'DockerImageFunction' constructor of 'aws_lambda' to indicate what type of our function shuold be and where are the contents needed for buildiing phase(line 19)
+The rest are just for building the entire thing up, which is identical to normal lambda
+![](https://i.imgur.com/xFZBDv5.png)
 
+After all these been done,
+we can use 'cdk synth' to check everything is working
+and use 'cdk deploy' to deploy this function
+
+### Good to go
+Finally, you should be able to create a lambda function
+![](https://i.imgur.com/3awnol7.png)
+
+And, test whether it works properly
+![](https://i.imgur.com/whgG1Jv.png)
